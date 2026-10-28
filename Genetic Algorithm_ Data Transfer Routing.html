@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Genetic Algorithm: Data Transfer Routing</title>
+<style>
+:root{--bg:#f4f7fb;--fg:#12294a;--card:#fff;--muted:#5b6b82;--line:#d5deeb;--acc:#2f7de1;--good:#1f9d57;--warn:#e0a100;--bad:#d9382c;--btn:#12294a;--btnfg:#fff;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0d1a2e;--fg:#e8eefb;--card:#142540;--muted:#9fb0cc;--line:#26406a;--acc:#5ea2ff;--good:#3ddc84;--warn:#ffc83d;--bad:#ff6b5e;--btn:#5ea2ff;--btnfg:#0d1a2e}}
+:root[data-theme="dark"]{--bg:#0d1a2e;--fg:#e8eefb;--card:#142540;--muted:#9fb0cc;--line:#26406a;--acc:#5ea2ff;--good:#3ddc84;--warn:#ffc83d;--bad:#ff6b5e;--btn:#5ea2ff;--btnfg:#0d1a2e}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.45}
+main{max-width:1000px;margin:0 auto;padding:16px}
+h1{font-size:1.5rem;margin:.2rem 0}
+.sub{color:var(--muted);margin:0 0 14px}
+.grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:14px}
+@media(max-width:780px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+canvas{width:100%;display:block;border-radius:8px;background:var(--bg);border:1px solid var(--line)}
+#c{aspect-ratio:1/1}
+#h{aspect-ratio:4/1;margin-top:8px}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:.8rem;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+button{background:var(--btn);color:var(--btnfg);border:0;border-radius:8px;padding:9px 12px;font-weight:600;cursor:pointer;font-size:.9rem}
+button.alt{background:transparent;color:var(--fg);border:1px solid var(--line)}
+label{display:block;font-size:.85rem;margin:8px 0 2px;color:var(--muted)}
+input[type=range]{width:100%}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.stat{border:1px solid var(--line);border-radius:8px;padding:8px}
+.stat b{display:block;font-size:1.3rem}
+.stat span{font-size:.75rem;color:var(--muted)}
+#log{height:100px;overflow-y:auto;font-size:.8rem;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:6px;margin:0}
+details{margin-top:12px;font-size:.88rem}
+summary{cursor:pointer;font-weight:600}
+</style>
+</head>
+<body>
+<main>
+<h1>Genetic Algorithm: Data Transfer Routing</h1>
+<p class="sub">Evolve the best route for data packets from Source (S) to Destination (D). Click any link to cut it and watch the algorithm adapt.</p>
+<div class="grid">
+<div class="card">
+<canvas id="c" width="640" height="640"></canvas>
+<canvas id="h" width="640" height="160"></canvas>
+<div class="legend"><span><i style="background:var(--acc)"></i>Best route</span><span><i style="background:var(--muted)"></i>Population routes</span><span><i style="background:var(--bad)"></i>Failed link</span><span>Numbers = link cost (delay + congestion)</span></div>
+</div>
+<div class="card">
+<div class="row">
+<button id="run">Run</button>
+<button id="step" class="alt">Step</button>
+<button id="reset" class="alt">Reset GA</button>
+<button id="net" class="alt">New network</button>
+</div>
+<label>Population size: <span id="pv"></span></label>
+<input type="range" id="pop" min="20" max="200" step="10" value="60">
+<label>Mutation rate: <span id="mv"></span></label>
+<input type="range" id="mut" min="1" max="50" value="15">
+<label>Speed (generations/sec): <span id="sv"></span></label>
+<input type="range" id="spd" min="1" max="30" value="8">
+<div class="stats">
+<div class="stat"><b id="s1">0</b><span>Generation</span></div>
+<div class="stat"><b id="s2">-</b><span>Best route cost</span></div>
+<div class="stat"><b id="s3">-</b><span>Optimal cost (Dijkstra check)</span></div>
+<div class="stat"><b id="s4">-</b><span>Gap to optimal / hops</span></div>
+</div>
+<p id="log"></p>
+<details><summary>How it works</summary>
+<p><b>Chromosome:</b> a route, i.e. a list of nodes from S to D.</p>
+<p><b>Fitness:</b> total link cost along the route (lower is better). Cost combines delay and congestion. Cut links add a huge penalty.</p>
+<p><b>Selection:</b> tournament of 3, plus the 2 best routes always survive (elitism).</p>
+<p><b>Crossover:</b> two parents swap their tails at a shared node, and any loops are removed.</p>
+<p><b>Mutation:</b> a random node is chosen and the rest of the route is replaced with a new random path.</p>
+<p>A Dijkstra shortest path is computed only to show how close the GA gets to the true optimum.</p></details>
+</div>
+</div>
+</main>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d'),hc=document.getElementById('h'),hx=hc.getContext('2d');
+const $=id=>document.getElementById(id),rnd=Math.random,S=0,D=1;
+let N=[],E=[],adj=[],pop=[],gen=0,H={b:[],a:[]},running=false,acc=0,last=0,opt=Infinity,hit=false;
+function log(t){const l=$('log');l.innerHTML=t+'<br>'+l.innerHTML}
+function dijk(){const d=N.map(()=>Infinity),pr=[],done=[];d[S]=0;
+for(;;){let u=-1;d.forEach((v,i)=>{if(!done[i]&&v<Infinity&&(u<0||v<d[u]))u=i});if(u<0)break;done[u]=1;
+adj[u].forEach(o=>{if(E[o.e].dead)return;const nd=d[u]+E[o.e].cost;if(nd<d[o.to]){d[o.to]=nd;pr[o.to]=u}})}
+return d[D]}
+function genNet(){for(;;){N=[{x:.07,y:.5},{x:.93,y:.5}];
+while(N.length<14){const p={x:.15+.7*rnd(),y:.08+.84*rnd()};if(N.every(n=>Math.hypot(n.x-p.x,n.y-p.y)>.14))N.push(p)}
+E=[];const seen=new Set();
+N.forEach((n,i)=>{N.map((m,j)=>({j,d:Math.hypot(n.x-m.x,n.y-m.y)})).filter(o=>o.j!=i).sort((a,b)=>a.d-b.d).slice(0,3).forEach(o=>{
+const a=Math.min(i,o.j),b=Math.max(i,o.j),k=a+'-'+b;if(!seen.has(k)){seen.add(k);E.push({a,b,cost:Math.round(o.d*100*(1+2*rnd())),dead:false})}})});
+adj=N.map(()=>[]);E.forEach((e,i)=>{adj[e.a].push({to:e.b,e:i});adj[e.b].push({to:e.a,e:i})});
+if(dijk()<Infinity)break}}
+const eid=(a,b)=>adj[a].find(o=>o.to==b).e;
+function cost(p){let c=0;for(let i=0;i<p.length-1;i++){const e=E[eid(p[i],p[i+1])];c+=e.cost+(e.dead?5000:0)}return c}
+function rp(u,forb){const seen=new Set(forb),out=[];
+function go(x){seen.add(x);out.push(x);if(x==D)return true;
+const nb=adj[x].filter(o=>!E[o.e].dead&&!seen.has(o.to));
+for(let i=nb.length-1;i>0;i--){const j=(rnd()*(i+1))|0;[nb[i],nb[j]]=[nb[j],nb[i]]}
+for(const o of nb)if(go(o.to))return true;out.pop();return false}
+return go(u)?out:null}
+function cross(a,b){const com=a.slice(1,-1).filter(x=>b.includes(x));if(!com.length)return a.slice();
+const c=com[(rnd()*com.length)|0],ch=a.slice(0,a.indexOf(c)+1).concat(b.slice(b.indexOf(c)+1)),o=[];
+for(const x of ch){const k=o.indexOf(x);if(k>=0)o.length=k+1;else o.push(x)}return o}
+function mutate(p){const i=(rnd()*(p.length-1))|0,pre=p.slice(0,i+1),r=rp(p[i],new Set(pre.slice(0,-1)));return r?pre.slice(0,-1).concat(r):p}
+function evaluate(){pop.forEach(x=>x.c=cost(x.p));pop.sort((a,b)=>a.c-b.c);
+if(!pop.length)return;H.b.push(pop[0].c);H.a.push(pop.reduce((s,x)=>s+Math.min(x.c,1500),0)/pop.length);
+if(!hit&&pop[0].c==opt){hit=true;log('Reached the optimal route at generation '+gen+'.')}}
+function init(){gen=0;H={b:[],a:[]};hit=false;opt=dijk();pop=[];
+if(opt<Infinity){const n=+$('pop').value;for(let i=0;i<n;i++)pop.push({p:rp(S,new Set())})}else log('No route exists. Restore a link.');
+evaluate();upd()}
+function step(){if(!pop.length)return;const n=pop.length,mr=$('mut').value/100,nx=pop.slice(0,2).map(x=>({p:x.p}));
+const tour=()=>{let b=null;for(let i=0;i<3;i++){const c=pop[(rnd()*n)|0];if(!b||c.c<b.c)b=c}return b.p};
+while(nx.length<n){let ch=cross(tour(),tour());if(rnd()<mr)ch=mutate(ch);nx.push({p:ch})}
+pop=nx;gen++;evaluate();upd()}
+function upd(){$('pv').textContent=$('pop').value;$('mv').textContent=$('mut').value+'%';$('sv').textContent=$('spd').value;
+$('s1').textContent=gen;const b=pop.length?pop[0].c:Infinity;
+$('s2').textContent=b<5000?b:'-';$('s3').textContent=opt<Infinity?opt:'none';
+$('s4').textContent=b<5000&&opt<Infinity?Math.round(100*(b-opt)/opt)+'% / '+(pop[0].p.length-1)+' hops':'-'}
+function pt(n,k){return[n.x*k,n.y*k]}
+function col(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()}
+function pathLine(p,k){ctx.beginPath();p.forEach((v,i)=>{const[x,y]=pt(N[v],k);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke()}
+function draw(t){const k=cv.width;ctx.clearRect(0,0,k,k);
+const ca=col('--acc'),cm=col('--muted'),cl=col('--line'),cb=col('--bad'),cg=col('--good'),cw=col('--warn'),cf=col('--fg');
+ctx.font='13px system-ui';ctx.textAlign='center';
+E.forEach(e=>{const[x1,y1]=pt(N[e.a],k),[x2,y2]=pt(N[e.b],k);ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);
+ctx.strokeStyle=e.dead?cb:cl;ctx.lineWidth=e.dead?2.5:1.5;ctx.setLineDash(e.dead?[6,5]:[]);ctx.stroke();ctx.setLineDash([]);
+ctx.fillStyle=e.dead?cb:cm;ctx.fillText(e.dead?'X':e.cost,(x1+x2)/2,(y1+y2)/2-4)});
+ctx.globalAlpha=.18;ctx.strokeStyle=cm;ctx.lineWidth=3;pop.slice(1,15).forEach(x=>pathLine(x.p,k));ctx.globalAlpha=1;
+if(pop.length&&pop[0].c<5000){const p=pop[0].p;ctx.strokeStyle=ca;ctx.lineWidth=5;ctx.lineJoin='round';pathLine(p,k);
+const pts=p.map(v=>pt(N[v],k)),len=[];let tot=0;for(let i=1;i<pts.length;i++){const l=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);len.push(l);tot+=l}
+for(let j=0;j<5;j++){let d=(((t/3500)+j/5)%1)*tot,i=0;while(i<len.length-1&&d>len[i]){d-=len[i];i++}
+const f=d/len[i],x=pts[i][0]+(pts[i+1][0]-pts[i][0])*f,y=pts[i][1]+(pts[i+1][1]-pts[i][1])*f;
+ctx.fillStyle=cf;ctx.beginPath();ctx.arc(x,y,5,0,7);ctx.fill()}}
+N.forEach((n,i)=>{const[x,y]=pt(n,k);ctx.beginPath();ctx.arc(x,y,i<2?17:10,0,7);ctx.fillStyle=i==S?cg:i==D?cw:cm;ctx.fill();
+if(i<2){ctx.fillStyle='#000';ctx.font='bold 15px system-ui';ctx.fillText(i?'D':'S',x,y+5);ctx.font='13px system-ui'}});
+drawH()}
+function drawH(){const w=hc.width,h=hc.height;hx.clearRect(0,0,w,h);if(H.b.length<2)return;
+const mx=Math.max(...H.a,...H.b.map(v=>Math.min(v,1500)))*1.05,mn=Math.min(...H.b,opt)*.9,sy=v=>h-8-(Math.min(v,mx)-mn)/(mx-mn||1)*(h-16),sx=i=>8+i/(H.b.length-1)*(w-16);
+const line=(arr,c,dash)=>{hx.beginPath();arr.forEach((v,i)=>i?hx.lineTo(sx(i),sy(v)):hx.moveTo(sx(i),sy(v)));hx.strokeStyle=c;hx.lineWidth=2;hx.setLineDash(dash||[]);hx.stroke();hx.setLineDash([])};
+line(H.a,col('--muted'));line(H.b,col('--acc'));line(H.b.map(()=>opt),col('--good'),[6,4]);
+hx.fillStyle=col('--muted');hx.font='12px system-ui';hx.fillText('Cost per generation: blue = best, grey = average, green = optimal',10,14)}
+function loop(t){const dt=Math.min(.05,(t-last)/1000||0);last=t;
+if(running){acc+=dt*$('spd').value;while(acc>=1){step();acc--}}draw(t);requestAnimationFrame(loop)}
+cv.onclick=ev=>{const r=cv.getBoundingClientRect(),x=(ev.clientX-r.left)/r.width,y=(ev.clientY-r.top)/r.height;let b=null,bd=.035;
+E.forEach(e=>{const A=N[e.a],B=N[e.b],dx=B.x-A.x,dy=B.y-A.y,u=Math.max(0,Math.min(1,((x-A.x)*dx+(y-A.y)*dy)/(dx*dx+dy*dy))),d=Math.hypot(x-A.x-u*dx,y-A.y-u*dy);if(d<bd){bd=d;b=e}});
+if(b){b.dead=!b.dead;log(b.dead?'Link cut. The GA must reroute.':'Link restored.');opt=dijk();hit=false;if(!pop.length&&opt<Infinity){const n=+$('pop').value;for(let i=0;i<n;i++)pop.push({p:rp(S,new Set())})}evaluate();upd()}};
+$('run').onclick=e=>{running=!running;e.target.textContent=running?'Pause':'Run'};
+$('step').onclick=step;$('reset').onclick=()=>{init();log('GA restarted with a new random population.')};
+$('net').onclick=()=>{genNet();init();log('New network generated.')};
+['pop','mut','spd'].forEach(i=>$(i).oninput=upd);$('pop').onchange=init;
+genNet();init();log('Press Run to start evolving.');requestAnimationFrame(loop);
+</script>
+</body>
+</html>
